@@ -8,4 +8,14 @@ layout:
 - go.kubebuilder.io/v4
 projectName: slo-guardian
 repo: github.com/Shihasz/slo-guardian
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: sre.dev
+  group: sre
+  kind: SLOPolicy
+  path: github.com/Shihasz/slo-guardian/api/v1alpha1
+  version: v1alpha1
 version: "3"

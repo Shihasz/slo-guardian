@@ -1,0 +1,106 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: slopolicies.sre.sre.dev
+spec:
+  group: sre.sre.dev
+  names:
+    kind: SLOPolicy
+    listKind: SLOPolicyList
+    plural: slopolicies
+    singular: slopolicy
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: SLOPolicy is the Schema for the slopolicies API
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of SLOPolicy
+            properties:
+              checkIntervalSeconds:
+                description: CheckIntervalSeconds is how often to probe the target
+                type: integer
+              remediationAction:
+                description: RemediationAction is what to do when the error budget
+                  is exhausted
+                enum:
+                - None
+                - RestartDeployment
+                - ScaleUp
+                type: string
+              sloTargetPercent:
+                description: SLOTargetPercent is the required availability, e.g. 99.9
+                type: number
+              targetDeployment:
+                description: TargetDeployment is the name of the Deployment this policy
+                  watches
+                type: string
+              targetURL:
+                description: TargetURL is the HTTP endpoint to health-check
+                type: string
+            required:
+            - checkIntervalSeconds
+            - remediationAction
+            - sloTargetPercent
+            - targetDeployment
+            - targetURL
+            type: object
+          status:
+            description: status defines the observed state of SLOPolicy
+            properties:
+              currentAvailabilityPercent:
+                description: CurrentAvailabilityPercent is the measured availability
+                  over the tracked window
+                type: number
+              errorBudgetRemainingPercent:
+                description: ErrorBudgetRemainingPercent is how much budget is left
+                  before breach
+                type: number
+              failedChecks:
+                description: FailedChecks is the number of failed health checks so
+                  far
+                format: int64
+                type: integer
+              lastCheckTime:
+                description: LastCheckTime is when the last health check ran
+                format: date-time
+                type: string
+              lastRemediationTime:
+                description: LastRemediationTime is when remediation was last triggered
+                format: date-time
+                type: string
+              totalChecks:
+                description: TotalChecks is the number of health checks performed
+                  so far
+                format: int64
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
