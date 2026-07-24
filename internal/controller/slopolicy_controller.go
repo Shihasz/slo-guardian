@@ -18,7 +18,9 @@ package controller
 
 import (
 	"context"
+	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,11 +49,26 @@ type SLOPolicyReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = logf.FromContext(ctx)
+	log := logf.FromContext(ctx)
 
-	// TODO(user): your logic here
+	var policy srev1alpha1.SLOPolicy
+	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
+		if apierrors.IsNotFound(err) {
+			log.Info("SLOPolicy deleted, nothing to do", "name", req.Name)
+			return ctrl.Result{}, nil
+		}
+		log.Error(err, "unable to fetch SLOPolicy")
+		return ctrl.Result{}, err
+	}
 
-	return ctrl.Result{}, nil
+	log.Info("reconciling SLOPolicy",
+		"name", policy.Name,
+		"targetDeployment", policy.Spec.TargetDeployment,
+		"targetURL", policy.Spec.TargetURL,
+		"sloTarget", policy.Spec.SLOTargetPercent,
+	)
+
+	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
