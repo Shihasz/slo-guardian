@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -32,7 +33,8 @@ import (
 // SLOPolicyReconciler reconciles a SLOPolicy object
 type SLOPolicyReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme  *runtime.Scheme
+	Tracker *Tracker
 }
 
 // +kubebuilder:rbac:groups=sre.sre.dev,resources=slopolicies,verbs=get;list;watch;create;update;patch;delete
@@ -61,18 +63,43 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	}
 
-	log.Info("reconciling SLOPolicy",
+	success := probeTarget(policy.Spec.TargetURL)
+
+	key := req.NamespacedName.String()
+	availability, windowCount := r.Tracker.Record(key, success)
+
+	log.Info("health check result",
 		"name", policy.Name,
-		"targetDeployment", policy.Spec.TargetDeployment,
 		"targetURL", policy.Spec.TargetURL,
-		"sloTarget", policy.Spec.SLOTargetPercent,
+		"success", success,
+		"availabilityPercent", availability,
+		"windowCount", windowCount,
 	)
 
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	interval := time.Duration(policy.Spec.CheckIntervalSeconds) * time.Second
+	if interval <= 0 {
+		interval = 10 * time.Second
+	}
+	return ctrl.Result{RequeueAfter: interval}, nil
+}
+
+// probeTarget does a simple HTTP GET with a short timeout and treats any
+// 2xx/3xx response as healthy.
+func probeTarget(url string) bool {
+	client := http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode < 400
 }
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *SLOPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	if r.Tracker == nil {
+		r.Tracker = NewTracker()
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&srev1alpha1.SLOPolicy{}).
 		Named("slopolicy").
