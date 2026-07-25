@@ -53,6 +53,10 @@ type SLOPolicyReconciler struct {
 func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
+	if r.Tracker == nil {
+		r.Tracker = NewTracker()
+	}
+
 	var policy srev1alpha1.SLOPolicy
 	if err := r.Get(ctx, req.NamespacedName, &policy); err != nil {
 		if apierrors.IsNotFound(err) {

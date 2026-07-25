@@ -52,9 +52,15 @@ var _ = Describe("SLOPolicy Controller", func() {
 				resource := &srev1alpha1.SLOPolicy{
 					ObjectMeta: metav1.ObjectMeta{
 						Name:      resourceName,
-						Namespace: resourceNamespace,
+						Namespace: "default",
 					},
-					// TODO(user): Specify other spec details if needed.
+					Spec: srev1alpha1.SLOPolicySpec{
+						TargetDeployment:     "nginx-demo",
+						TargetURL:            "http://localhost:8080",
+						SLOTargetPercent:     99.9,
+						CheckIntervalSeconds: 10,
+						RemediationAction:    "None",
+					},
 				}
 				Expect(k8sClient.Create(ctx, resource)).To(Succeed())
 			}
