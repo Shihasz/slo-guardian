@@ -69,7 +69,7 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	success := probeTarget(policy.Spec.TargetURL)
 
-	key := req.NamespacedName.String()
+	key := req.String()
 	availability, windowCount := r.Tracker.Record(key, success)
 
 	log.Info("health check result",
@@ -90,12 +90,12 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 // probeTarget does a simple HTTP GET with a short timeout and treats any
 // 2xx/3xx response as healthy.
 func probeTarget(url string) bool {
-	client := http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(url)
+	httpClient := http.Client{Timeout: 3 * time.Second}
+	resp, err := httpClient.Get(url)
 	if err != nil {
 		return false
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode < 400
 }
 
