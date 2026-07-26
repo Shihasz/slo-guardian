@@ -14,7 +14,17 @@ spec:
     singular: slopolicy
   scope: Namespaced
   versions:
-  - name: v1alpha1
+  - additionalPrinterColumns:
+    - jsonPath: .status.currentAvailabilityPercent
+      name: Availability
+      type: string
+    - jsonPath: .status.errorBudgetRemainingPercent
+      name: Budget Remaining
+      type: string
+    - jsonPath: .spec.sloTargetPercent
+      name: Target
+      type: string
+    name: v1alpha1
     schema:
       openAPIV3Schema:
         description: SLOPolicy is the Schema for the slopolicies API

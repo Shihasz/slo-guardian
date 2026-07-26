@@ -22,10 +22,13 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
 	srev1alpha1 "github.com/Shihasz/slo-guardian/api/v1alpha1"
 )
@@ -72,11 +75,25 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	key := req.String()
 	availability, windowCount := r.Tracker.Record(key, success)
 
+	policy.Status.TotalChecks++
+	if !success {
+		policy.Status.FailedChecks++
+	}
+	policy.Status.CurrentAvailabilityPercent = availability
+	policy.Status.ErrorBudgetRemainingPercent = computeErrorBudgetRemaining(availability, policy.Spec.SLOTargetPercent)
+	now := metav1.Now()
+	policy.Status.LastCheckTime = now
+
+	if err := r.Status().Update(ctx, &policy); err != nil {
+		log.Error(err, "unable to update SLOPolicy status")
+		return ctrl.Result{}, err
+	}
+
 	log.Info("health check result",
 		"name", policy.Name,
-		"targetURL", policy.Spec.TargetURL,
 		"success", success,
 		"availabilityPercent", availability,
+		"errorBudgetRemainingPercent", policy.Status.ErrorBudgetRemainingPercent,
 		"windowCount", windowCount,
 	)
 
@@ -85,6 +102,19 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		interval = 10 * time.Second
 	}
 	return ctrl.Result{RequeueAfter: interval}, nil
+}
+
+// computeErrorBudgetRemaining returns the percentage of the allowed failure
+// budget that remains. 100 = full budget untouched, 0 = fully consumed,
+// negative = SLO breached (over budget).
+func computeErrorBudgetRemaining(availability, sloTarget float64) float64 {
+	allowedFailure := 100.0 - sloTarget
+	if allowedFailure <= 0 {
+		return 0
+	}
+	actualFailure := 100.0 - availability
+	remaining := allowedFailure - actualFailure
+	return (remaining / allowedFailure) * 100.0
 }
 
 // probeTarget does a simple HTTP GET with a short timeout and treats any
@@ -105,7 +135,7 @@ func (r *SLOPolicyReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		r.Tracker = NewTracker()
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&srev1alpha1.SLOPolicy{}).
+		For(&srev1alpha1.SLOPolicy{}, builder.WithPredicates(predicate.GenerationChangedPredicate{})).
 		Named("slopolicy").
 		Complete(r)
 }

@@ -63,6 +63,9 @@ type SLOPolicyStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:printcolumn:name="Availability",type=string,JSONPath=`.status.currentAvailabilityPercent`
+// +kubebuilder:printcolumn:name="Budget Remaining",type=string,JSONPath=`.status.errorBudgetRemainingPercent`
+// +kubebuilder:printcolumn:name="Target",type=string,JSONPath=`.spec.sloTargetPercent`
 
 // SLOPolicy is the Schema for the slopolicies API
 type SLOPolicy struct {
