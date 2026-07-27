@@ -38,6 +38,9 @@ type SLOPolicySpec struct {
 	// RemediationAction is what to do when the error budget is exhausted
 	// +kubebuilder:validation:Enum=None;RestartDeployment;ScaleUp
 	RemediationAction string `json:"remediationAction"`
+
+	// RemediationCooldownSeconds is the minimum time between remediation actions
+	RemediationCooldownSeconds int `json:"remediationCooldownSeconds"`
 }
 
 // SLOPolicyStatus defines the observed state of SLOPolicy

@@ -21,9 +21,13 @@ import (
 	"net/http"
 	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -36,23 +40,17 @@ import (
 // SLOPolicyReconciler reconciles a SLOPolicy object
 type SLOPolicyReconciler struct {
 	client.Client
-	Scheme  *runtime.Scheme
-	Tracker *Tracker
+	Scheme   *runtime.Scheme
+	Tracker  *Tracker
+	Recorder record.EventRecorder
 }
 
 // +kubebuilder:rbac:groups=sre.sre.dev,resources=slopolicies,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=sre.sre.dev,resources=slopolicies/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=sre.sre.dev,resources=slopolicies/finalizers,verbs=update
+// +kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;update;patch
+// +kubebuilder:rbac:groups="",resources=events,verbs=create;patch
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the SLOPolicy object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.24.1/pkg/reconcile
 func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
 
@@ -83,6 +81,16 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	policy.Status.ErrorBudgetRemainingPercent = computeErrorBudgetRemaining(availability, policy.Spec.SLOTargetPercent)
 	now := metav1.Now()
 	policy.Status.LastCheckTime = now
+
+	if policy.Status.ErrorBudgetRemainingPercent < 0 && windowCount >= 1 {
+		if r.canRemediate(&policy, now) {
+			if err := r.remediate(ctx, &policy); err != nil {
+				log.Error(err, "remediation failed")
+			} else {
+				policy.Status.LastRemediationTime = &now
+			}
+		}
+	}
 
 	if err := r.Status().Update(ctx, &policy); err != nil {
 		log.Error(err, "unable to update SLOPolicy status")
@@ -127,6 +135,59 @@ func probeTarget(url string) bool {
 	}
 	defer func() { _ = resp.Body.Close() }()
 	return resp.StatusCode < 400
+}
+
+// canRemediate checks whether enough time has passed since the last
+// remediation attempt to avoid repeatedly restarting/scaling the target.
+func (r *SLOPolicyReconciler) canRemediate(policy *srev1alpha1.SLOPolicy, now metav1.Time) bool {
+	if policy.Spec.RemediationAction == "None" || policy.Spec.RemediationAction == "" {
+		return false
+	}
+	if policy.Status.LastRemediationTime == nil {
+		return true
+	}
+	cooldown := time.Duration(policy.Spec.RemediationCooldownSeconds) * time.Second
+	if cooldown <= 0 {
+		cooldown = 60 * time.Second
+	}
+	return now.Sub(policy.Status.LastRemediationTime.Time) >= cooldown
+}
+
+// remediate applies the configured remediation action against the target Deployment.
+func (r *SLOPolicyReconciler) remediate(ctx context.Context, policy *srev1alpha1.SLOPolicy) error {
+	var deploy appsv1.Deployment
+	deployKey := types.NamespacedName{Name: policy.Spec.TargetDeployment, Namespace: policy.Namespace}
+	if err := r.Get(ctx, deployKey, &deploy); err != nil {
+		return err
+	}
+
+	switch policy.Spec.RemediationAction {
+	case "RestartDeployment":
+		if deploy.Spec.Template.Annotations == nil {
+			deploy.Spec.Template.Annotations = map[string]string{}
+		}
+		deploy.Spec.Template.Annotations["slo-guardian/restartedAt"] = time.Now().Format(time.RFC3339)
+		if err := r.Update(ctx, &deploy); err != nil {
+			return err
+		}
+		r.Recorder.Eventf(policy, corev1.EventTypeWarning, "Remediated",
+			"Restarted deployment %s after error budget breach", deploy.Name)
+
+	case "ScaleUp":
+		var replicas int32 = 1
+		if deploy.Spec.Replicas != nil {
+			replicas = *deploy.Spec.Replicas
+		}
+		replicas++
+		deploy.Spec.Replicas = &replicas
+		if err := r.Update(ctx, &deploy); err != nil {
+			return err
+		}
+		r.Recorder.Eventf(policy, corev1.EventTypeWarning, "Remediated",
+			"Scaled deployment %s to %d replicas after error budget breach", deploy.Name, replicas)
+	}
+
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.

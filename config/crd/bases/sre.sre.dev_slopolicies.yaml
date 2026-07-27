@@ -60,6 +60,10 @@ spec:
                 - RestartDeployment
                 - ScaleUp
                 type: string
+              remediationCooldownSeconds:
+                description: RemediationCooldownSeconds is the minimum time between
+                  remediation actions
+                type: integer
               sloTargetPercent:
                 description: SLOTargetPercent is the required availability, e.g. 99.9
                 type: number
@@ -73,6 +77,7 @@ spec:
             required:
             - checkIntervalSeconds
             - remediationAction
+            - remediationCooldownSeconds
             - sloTargetPercent
             - targetDeployment
             - targetURL

@@ -181,6 +181,11 @@ func main() {
 	if err := (&controller.SLOPolicyReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		//nolint:staticcheck
+		// GetEventRecorderFor is deprecated in favor of GetEventRecorder (events.k8s.io API),
+		// but still fully supported; migrating would also require RBAC changes for the
+		// events.k8s.io API group. Keeping the stable v1 Events API for now.
+		Recorder: mgr.GetEventRecorderFor("slopolicy-controller"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "slopolicy")
 		os.Exit(1)
