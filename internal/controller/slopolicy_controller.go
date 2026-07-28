@@ -82,12 +82,22 @@ func (r *SLOPolicyReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	now := metav1.Now()
 	policy.Status.LastCheckTime = now
 
+	availabilityGauge.WithLabelValues(policy.Name, policy.Namespace).Set(availability)
+	errorBudgetGauge.WithLabelValues(policy.Name, policy.Namespace).Set(policy.Status.ErrorBudgetRemainingPercent)
+
+	resultLabel := "success"
+	if !success {
+		resultLabel = "failure"
+	}
+	checksTotal.WithLabelValues(policy.Name, policy.Namespace, resultLabel).Inc()
+
 	if policy.Status.ErrorBudgetRemainingPercent < 0 && windowCount >= 1 {
 		if r.canRemediate(&policy, now) {
 			if err := r.remediate(ctx, &policy); err != nil {
 				log.Error(err, "remediation failed")
 			} else {
 				policy.Status.LastRemediationTime = &now
+				remediationsTotal.WithLabelValues(policy.Name, policy.Namespace, policy.Spec.RemediationAction).Inc()
 			}
 		}
 	}
