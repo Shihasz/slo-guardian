@@ -23,6 +23,7 @@ import (
 	. "github.com/onsi/gomega"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -78,16 +79,27 @@ var _ = Describe("SLOPolicy Controller", func() {
 		It("should successfully reconcile the resource", func() {
 			By("Reconciling the created resource")
 			controllerReconciler := &SLOPolicyReconciler{
-				Client: k8sClient,
-				Scheme: k8sClient.Scheme(),
+				Client:   k8sClient,
+				Scheme:   k8sClient.Scheme(),
+				Tracker:  NewTracker(),
+				Recorder: record.NewFakeRecorder(10),
 			}
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{
 				NamespacedName: typeNamespacedName,
 			})
 			Expect(err).NotTo(HaveOccurred())
-			// TODO(user): Add more specific assertions depending on your controller's reconciliation logic.
-			// Example: If you expect a certain status condition after reconciliation, verify it here.
+
+			By("Checking the SLOPolicy status was updated after reconcile")
+			updated := &srev1alpha1.SLOPolicy{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, typeNamespacedName, updated)
+				return err == nil && updated.Status.TotalChecks > 0
+			}, "5s", "200ms").Should(BeTrue())
+
+			Expect(updated.Status.TotalChecks).To(Equal(int64(1)))
+			Expect(updated.Status.FailedChecks).To(Equal(int64(1)))
+			Expect(updated.Status.CurrentAvailabilityPercent).To(Equal(0.0))
 		})
 	})
 })
