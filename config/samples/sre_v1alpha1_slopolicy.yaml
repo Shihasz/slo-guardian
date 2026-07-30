@@ -8,3 +8,4 @@ spec:
   sloTargetPercent: 99.9
   checkIntervalSeconds: 15
   remediationAction: RestartDeployment
+  remediationCooldownSeconds: 30
