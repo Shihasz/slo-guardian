@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -270,15 +271,70 @@ var _ = Describe("Manager", Ordered, func() {
 
 		// +kubebuilder:scaffold:e2e-webhooks-checks
 
-		// TODO: Customize the e2e test suite with scenarios specific to your project.
-		// Consider applying sample/CR(s) and check their status and/or verifying
-		// the reconciliation by using the metrics, i.e.:
-		// metricsOutput, err := getMetricsOutput()
-		// Expect(err).NotTo(HaveOccurred(), "Failed to retrieve logs from curl pod")
-		// Expect(metricsOutput).To(ContainSubstring(
-		//    fmt.Sprintf(`controller_runtime_reconcile_total{controller="%s",result="success"} 1`,
-		//    strings.ToLower(<Kind>),
-		// ))
+		It("should reconcile a real SLOPolicy against a live target", func() {
+			By("deploying a target workload to monitor")
+			cmd := exec.Command("kubectl", "create", "deployment", "e2e-nginx", "--image=nginx:alpine", "--port=80")
+			_, err := utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create target deployment")
+
+			cmd = exec.Command("kubectl", "expose", "deployment", "e2e-nginx", "--port=80", "--target-port=80")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to expose target deployment")
+
+			By("waiting for the target deployment to be available")
+			cmd = exec.Command("kubectl", "wait", "--for=condition=available", "--timeout=60s", "deployment/e2e-nginx")
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Target deployment did not become available")
+
+			By("creating an SLOPolicy pointing at the target")
+			policyYAML := `
+apiVersion: sre.sre.dev/v1alpha1
+kind: SLOPolicy
+metadata:
+  name: e2e-slopolicy
+spec:
+  targetDeployment: e2e-nginx
+  targetURL: http://e2e-nginx.default.svc.cluster.local
+  sloTargetPercent: 99.9
+  checkIntervalSeconds: 5
+  remediationAction: None
+  remediationCooldownSeconds: 30
+`
+			cmd = exec.Command("kubectl", "apply", "-f", "-")
+			cmd.Stdin = strings.NewReader(policyYAML)
+			_, err = utils.Run(cmd)
+			Expect(err).NotTo(HaveOccurred(), "Failed to create SLOPolicy")
+
+			By("waiting for the controller to record health checks in status")
+			verifyStatus := func(g Gomega) {
+				cmd := exec.Command("kubectl", "get", "slopolicy", "e2e-slopolicy", "-o", "json")
+				output, err := utils.Run(cmd)
+				g.Expect(err).NotTo(HaveOccurred())
+
+				var policy map[string]interface{}
+				g.Expect(json.Unmarshal([]byte(output), &policy)).To(Succeed())
+
+				status, ok := policy["status"].(map[string]interface{})
+				g.Expect(ok).To(BeTrue(), "status field not yet populated")
+
+				totalChecks, ok := status["totalChecks"].(float64)
+				g.Expect(ok).To(BeTrue(), "totalChecks not yet populated")
+				g.Expect(totalChecks).To(BeNumerically(">", 0))
+
+				availability, ok := status["currentAvailabilityPercent"].(float64)
+				g.Expect(ok).To(BeTrue(), "currentAvailabilityPercent not yet populated")
+				g.Expect(availability).To(BeNumerically(">=", 80.0), "availability should have recovered to a healthy level")
+			}
+			Eventually(verifyStatus, 45*time.Second, 2*time.Second).Should(Succeed())
+
+			By("cleaning up the e2e target and policy")
+			cmd = exec.Command("kubectl", "delete", "slopolicy", "e2e-slopolicy")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "deployment", "e2e-nginx")
+			_, _ = utils.Run(cmd)
+			cmd = exec.Command("kubectl", "delete", "service", "e2e-nginx")
+			_, _ = utils.Run(cmd)
+		})
 	})
 })
 
