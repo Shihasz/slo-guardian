@@ -135,3 +135,7 @@ deployment, but is not currently applied to a live GCP project.
 Feature-complete for its current scope. Possible extensions: multi-endpoint targets,
 Slack/PagerDuty notifications on breach, a Grafana dashboard, webhook-based validation
 of SLOPolicy specs.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
